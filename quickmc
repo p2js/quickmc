@@ -1,0 +1,92 @@
+#!/usr/bin/node
+import fs from "node:fs";
+import rl from "node:readline/promises";
+import { exec } from "node:child_process";
+const DEFAULT_JAVA_PATH = "/usr/lib/jvm/jdk-21-oracle-x64/bin/java";
+
+let input = rl.createInterface({ input: process.stdin, output: process.stdout });
+let mc_versions = undefined;
+async function load_versions_manifest() {
+    try {
+        mc_versions = await fetch("https://launchermeta.mojang.com/mc/game/version_manifest.json").then(response => response.json());
+    } catch {
+        console.error("[quickMC] Failed to load mojang version manifest");
+        process.exit(-1);
+    }
+}
+
+let config = {};
+
+if (!fs.existsSync("quickmc.json") || process.argv[process.argv.length - 1] == "config") {
+    // Setup
+    console.log("Welcome to quickMC. let's get you set up!");
+    await load_versions_manifest();
+    console.log("Start by selecting a minecraft version for your server (leave blank for the latest).");
+    while (!config.version) {
+        config.version = await input.question("> ");
+        if (config.version == "") {
+            config.version = mc_versions.latest.release;
+        } else if (!mc_versions.versions.map(v => v.id).includes(config.version)) {
+            console.log("It seems that version of minecraft does not exist, please try again.");
+            config.version = "";
+        }
+    }
+    console.log(`Version has been set to ${config.version}.`);
+    console.log("Please enter the command/path for your JVM executable. Ensure it is the right one for your version!");
+    console.log(`Leave blank for the default directory (${DEFAULT_JAVA_PATH})`);
+    config.javaPath = await input.question("> ");
+    if (config.javaPath == "") config.javaPath = DEFAULT_JAVA_PATH;
+
+    console.log("Choose how many GB of ram to allocate to the server:");
+    while (!config.gb) {
+        config.gb = +await input.question("> ");
+        if (config.gb == NaN || config.gb < 0) {
+            console.log("Invalid amount, please enter a positive integer.");
+            config.gb = 0;
+        }
+    }
+    fs.writeFileSync("quickmc.json", JSON.stringify(config));
+    console.log("You're all set up! Configuration has been saved.");
+} else {
+    config = JSON.parse(fs.readFileSync("quickmc.json", "utf-8"));
+}
+
+const serverPath = `server-${config.version}.jar`;
+
+if (!fs.existsSync(serverPath)) {
+    console.error(`[quickMC] ${serverPath} not found, downloading...`);
+    await load_versions_manifest();
+    let version_package = mc_versions.versions.find(v => v.id == config.version).url;
+    if (!version_package) {
+        console.error("[quickMC] Bad mc version string");
+        process.exit(-1);
+    }
+    let jarDownloadLink;
+    try {
+        jarDownloadLink = (await fetch(version_package).then(response => response.json())).downloads?.server?.url;
+    } catch {
+        console.error("[quickMC] Failed to fetch download link for the version package, try rerunning or downloading manually");
+        process.exit(-1);
+    };
+    let jarContent;
+    try {
+        jarContent = (await fetch(jarDownloadLink).then(response => response.arrayBuffer()));
+    } catch {
+        console.error("[quickMC] Failed to download server jar, try rerunning or downloading manually");
+        process.exit(-1);
+    }
+    fs.writeFileSync(serverPath, Buffer.from(jarContent));
+}
+
+// Auto-agree to EULA
+fs.writeFileSync("eula.txt", "eula=true");
+
+const command = `${config.javaPath} -Xms${(config.gb || 1) * 1024}M -Xmx${(config.gb || 1) * 1024}M -jar ${serverPath} nogui`;
+console.log("[quickMC] starting server...");
+
+const server_child = exec(command);
+server_child.stdout.pipe(process.stdout);
+server_child.stderr.pipe(process.stderr);
+input.on("line", (i) => {
+    server_child.stdin.write(i + "\n");
+});
