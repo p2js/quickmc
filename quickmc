@@ -85,8 +85,15 @@ const command = `${config.javaPath} -Xms${(config.gb || 1) * 1024}M -Xmx${(confi
 console.log("[quickMC] starting server...");
 
 const server_child = exec(command);
+// Pipe stderr and stdout
 server_child.stdout.pipe(process.stdout);
 server_child.stderr.pipe(process.stderr);
+// Forward commands sent from stdin
 input.on("line", (i) => {
     server_child.stdin.write(i + "\n");
+});
+// Exit gracefully
+server_child.on("close", (code) => {
+    input.close();
+    process.exit(code);
 });
