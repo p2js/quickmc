@@ -1,99 +1,115 @@
-#!/usr/bin/node
-import fs from "node:fs";
-import rl from "node:readline/promises";
-import { exec } from "node:child_process";
-const DEFAULT_JAVA_PATH = "/usr/lib/jvm/jdk-21-oracle-x64/bin/java";
+#!/bin/bash
+if [ -x "$(command -v node)" ]; then
+    QMC_NODE=true
+elif ! [ -x "$(command -v python2)" ]; then
+    echo "quickMC requires either node.js or python3 to run, since it requires a JSON parser. Please install one of the two and try again."
+    exit 1
+fi
 
-let input = rl.createInterface({ input: process.stdin, output: process.stdout });
-let mc_versions = undefined;
-async function load_versions_manifest() {
-    try {
-        mc_versions = await fetch("https://launchermeta.mojang.com/mc/game/version_manifest.json").then(response => response.json());
-    } catch {
-        console.error("[quickMC] Failed to load mojang version manifest");
-        process.exit(-1);
-    }
-}
+if ! [ -f quickmc.properties ]; then
+    # Initial setup
+    DEFAULT_JAVA_PATH="/usr/lib/jvm/jdk-21-oracle-x64/bin/java"
+    curl -s "https://launchermeta.mojang.com/mc/game/version_manifest.json" > mc_version_manifest.json
+    echo "Thanks for using quickMC. Let's get you set up!"
+    echo "Input the version of minecraft you want your server to run on (leave blank to use latest):"
+    while : ; do
+        read SERVER_VER
+        if [ "$SERVER_VER" = "" ]; then
+            if [ "$QMC_NODE" = true ]; then
+                SERVER_VER=$(node -e "console.log(require('./mc_version_manifest.json').latest.release)")
+            else
+                SERVER_VER=$(python3 -c "import json;
+with open('mc_version_manifest.json') as file:
+    manifest = json.load(file)
+    print(manifest['latest']['release'])")
+            fi
+            break
+        fi
+        if [ "$QMC_NODE" = true ]; then
+            VER_EXISTS=$(node -e "if(require('./mc_version_manifest.json').versions.map(v => v.id).includes('$SERVER_VER')) process.stdout.write('1\n')")
+            if [ "$VER_EXISTS" = "1" ]; then
+                break
+            else
+                echo "It seems that version of minecraft does not exist, please try again."
+            fi
+        else
+            VER_EXISTS=$(python3 -c "import json;
+            with open('mc_version_manifest.json') as file:
+                manifest = json.load(file)
+                print(len([v for v in manifest['versions'] if v['id'] == '$SERVER_VER']))
+            ")
+            if [ "$VER_EXISTS" = "1" ]; then
+                break
+            else
+                echo "It seems that version of minecraft does not exist, please try again."
+            fi
+        fi
+    done
+    echo "Version has been set to $SERVER_VER."
+    echo "Please enter the command/path for your JVM executable. Ensure it is the right one for your version!"
+    echo "Leave blank for the default directory ($DEFAULT_JAVA_PATH)"
+    read JVM_PATH
+    if [ "$JVM_PATH" = "" ]; then
+        JVM_PATH="$DEFAULT_JAVA_PATH"
+    fi
+    echo "Choose how many GB of ram to allocate to the server:"
+    while : ; do
+        read JVM_GB
+        if [[ $JVM_GB =~ ^[1-9]\d*$ ]] ; then
+            break
+        fi
+        echo "Invalid amount, please enter a positive integer."
+    done
 
-let config = {};
+    echo "SERVER_VER=\"$SERVER_VER\"
+JVM_PATH=\"$JVM_PATH\"
+JVM_GB=\"$JVM_GB\"
+    " > quickmc.properties
 
-if (!fs.existsSync("quickmc.json") || process.argv[process.argv.length - 1] == "config") {
-    // Setup
-    console.log("Welcome to quickMC. let's get you set up!");
-    await load_versions_manifest();
-    console.log("Start by selecting a minecraft version for your server (leave blank for the latest).");
-    while (!config.version) {
-        config.version = await input.question("> ");
-        if (config.version == "") {
-            config.version = mc_versions.latest.release;
-        } else if (!mc_versions.versions.map(v => v.id).includes(config.version)) {
-            console.log("It seems that version of minecraft does not exist, please try again.");
-            config.version = "";
-        }
-    }
-    console.log(`Version has been set to ${config.version}.`);
-    console.log("Please enter the command/path for your JVM executable. Ensure it is the right one for your version!");
-    console.log(`Leave blank for the default directory (${DEFAULT_JAVA_PATH})`);
-    config.javaPath = await input.question("> ");
-    if (config.javaPath == "") config.javaPath = DEFAULT_JAVA_PATH;
+    echo "You're all set up! Configuration has been saved."
+else
+    source quickmc.properties
+fi
 
-    console.log("Choose how many GB of ram to allocate to the server:");
-    while (!config.gb) {
-        config.gb = +await input.question("> ");
-        if (config.gb == NaN || config.gb < 0) {
-            console.log("Invalid amount, please enter a positive integer.");
-            config.gb = 0;
-        }
-    }
-    fs.writeFileSync("quickmc.json", JSON.stringify(config));
-    console.log("You're all set up! Configuration has been saved.");
-} else {
-    config = JSON.parse(fs.readFileSync("quickmc.json", "utf-8"));
-}
+JAR_PATH="server-$SERVER_VER.jar"
+(( JVM_M = JVM_GB * 1024 ))
+JAVA_COMMAND="$JVM_PATH -Xms${JVM_M}M -Xmx${JVM_M}M -jar $JAR_PATH nogui"
 
-const serverPath = `server-${config.version}.jar`;
+if ! [ -f $JAR_PATH ]; then
+    echo "[quickMC] $JAR_PATH not found, downloading"
+    if ! [ -f mc_version_manifest.json ]; then
+        curl -s "https://launchermeta.mojang.com/mc/game/version_manifest.json" > mc_version_manifest.json
+    fi
+    if [ "$QMC_NODE" = true ]; then
+         VERSION_ASSETS_URL=$(node -e "console.log(require('./mc_version_manifest.json').versions.find(v => v.id == '$SERVER_VER').url)")
+    else
+         VERSION_ASSETS_URL=$(python3 -c "import json;
+with open('mc_version_manifest.json') as file:
+    manifest = json.load(file)
+    print([v for v in manifest['versions'] if v['id'] == '1.19.2'][0]['url'])")
+    fi
+    echo $VERSION_ASSETS_URL
+    curl -s $VERSION_ASSETS_URL > mc_version_assets.json
+    if [ "$QMC_NODE" = true ]; then
+        JAR_URL=$(node -e "console.log(require('./mc_version_assets.json').downloads?.server?.url || '')")
+    else
+        JAR_URL=$(python3 -c "import json;
+with open('mc_version_assets.json') as file:
+    assets = json.load(file)
+    print(assets['downloads']['server']['url'])")
+    fi
+    if [ "$JAR_URL" = "" ]; then
+       echo "[quickMC] Could not retrieve download for the server jar, the selected minecraft version may not have a server download. Change or delete quickmc.properties, then try again."
+       exit 1
+    fi
+    curl $JAR_URL > $JAR_PATH
 
-if (!fs.existsSync(serverPath)) {
-    console.error(`[quickMC] ${serverPath} not found, downloading...`);
-    await load_versions_manifest();
-    let version_package = mc_versions.versions.find(v => v.id == config.version).url;
-    if (!version_package) {
-        console.error("[quickMC] Bad mc version string");
-        process.exit(-1);
-    }
-    let jarDownloadLink;
-    try {
-        jarDownloadLink = (await fetch(version_package).then(response => response.json())).downloads?.server?.url;
-    } catch {
-        console.error("[quickMC] Failed to fetch download link for the version package, try rerunning or downloading manually");
-        process.exit(-1);
-    };
-    let jarContent;
-    try {
-        jarContent = (await fetch(jarDownloadLink).then(response => response.arrayBuffer()));
-    } catch {
-        console.error("[quickMC] Failed to download server jar, try rerunning or downloading manually");
-        process.exit(-1);
-    }
-    fs.writeFileSync(serverPath, Buffer.from(jarContent));
-}
+    rm mc_version_manifest.json mc_version_assets.json
+fi
 
-// Auto-agree to EULA
-fs.writeFileSync("eula.txt", "eula=true");
+# Auto-agree to eula
+echo "eula=true" > eula.txt
 
-const command = `${config.javaPath} -Xms${(config.gb || 1) * 1024}M -Xmx${(config.gb || 1) * 1024}M -jar ${serverPath} nogui`;
-console.log("[quickMC] starting server...");
+echo "[quickMC] Starting server..."
 
-const server_child = exec(command);
-// Pipe stderr and stdout
-server_child.stdout.pipe(process.stdout);
-server_child.stderr.pipe(process.stderr);
-// Forward commands sent from stdin
-input.on("line", (i) => {
-    server_child.stdin.write(i + "\n");
-});
-// Exit gracefully
-server_child.on("close", (code) => {
-    input.close();
-    process.exit(code);
-});
+$JAVA_COMMAND
