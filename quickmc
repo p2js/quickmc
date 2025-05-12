@@ -88,7 +88,6 @@ with open('mc_version_manifest.json') as file:
     manifest = json.load(file)
     print([v for v in manifest['versions'] if v['id'] == '1.19.2'][0]['url'])")
     fi
-    echo $VERSION_ASSETS_URL
     curl -s $VERSION_ASSETS_URL > mc_version_assets.json
     if [ "$QMC_NODE" = true ]; then
         JAR_URL=$(node -e "console.log(require('./mc_version_assets.json').downloads?.server?.url || '')")
@@ -98,8 +97,9 @@ with open('mc_version_assets.json') as file:
     assets = json.load(file)
     print(assets['downloads']['server']['url'])")
     fi
-    if [ "$JAR_URL" = "" ]; then
+    if ! [[ "$JAR_URL" =~ \.jar$ ]]; then
        echo "[quickMC] Could not retrieve download for the server jar, the selected minecraft version may not have a server download. Change or delete quickmc.properties, then try again."
+       echo $JAR_URL
        exit 1
     fi
     curl $JAR_URL > $JAR_PATH
