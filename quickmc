@@ -15,35 +15,13 @@ if ! [ -f quickmc.properties ]; then
     while : ; do
         read SERVER_VER
         if [ "$SERVER_VER" = "" ]; then
-            if [ "$QMC_NODE" = true ]; then
-                SERVER_VER=$(node -e "console.log(require('./mc_version_manifest.json').latest.release)")
-            else
-                SERVER_VER=$(python3 -c "import json;
-with open('mc_version_manifest.json') as file:
-    manifest = json.load(file)
-    print(manifest['latest']['release'])")
-            fi
+            SERVER_VER=$(grep -oP "(?<=\"latest\": {\"release\": \").*?(?=\")" mc_version_manifest.json)
+        fi
+        json=$(< mc_version_manifest.json)
+        if [[ $json =~ "\"id\": \"$SERVER_VER\"" ]]; then
             break
         fi
-        if [ "$QMC_NODE" = true ]; then
-            VER_EXISTS=$(node -e "if(require('./mc_version_manifest.json').versions.map(v => v.id).includes('$SERVER_VER')) process.stdout.write('1\n')")
-            if [ "$VER_EXISTS" = "1" ]; then
-                break
-            else
-                echo "It seems that version of minecraft does not exist, please try again."
-            fi
-        else
-            VER_EXISTS=$(python3 -c "import json;
-            with open('mc_version_manifest.json') as file:
-                manifest = json.load(file)
-                print(len([v for v in manifest['versions'] if v['id'] == '$SERVER_VER']))
-            ")
-            if [ "$VER_EXISTS" = "1" ]; then
-                break
-            else
-                echo "It seems that version of minecraft does not exist, please try again."
-            fi
-        fi
+        echo "It seems that version of minecraft does not exist, please try again."
     done
     echo "Version has been set to $SERVER_VER."
     echo "Please enter the command/path for your JVM executable. Ensure it is the right one for your version!"
@@ -86,7 +64,7 @@ if ! [ -f $JAR_PATH ]; then
          VERSION_ASSETS_URL=$(python3 -c "import json;
 with open('mc_version_manifest.json') as file:
     manifest = json.load(file)
-    print([v for v in manifest['versions'] if v['id'] == '1.19.2'][0]['url'])")
+    print([v for v in manifest['versions'] if v['id'] == '$SERVER_VER'][0]['url'])")
     fi
     curl -s $VERSION_ASSETS_URL > mc_version_assets.json
     if [ "$QMC_NODE" = true ]; then
