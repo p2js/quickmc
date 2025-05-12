@@ -1,4 +1,13 @@
 #!/bin/bash
+# QuickMC
+# A fast setup, version management and startup script for minecraft servers.
+# Simply download and invoke the script in the folder where you want your server.
+# You can then invoke it to set up and run the server.
+# If you want to change version at any point, invoke the script followed by "config".
+# Enjoy!
+
+# NOTE: Requires node.js or python3 to be installed to use their JSON parsers.
+
 if [ -x "$(command -v node)" ]; then
     QMC_NODE=true
 elif ! [ -x "$(command -v python2)" ]; then
@@ -6,9 +15,15 @@ elif ! [ -x "$(command -v python2)" ]; then
     exit 1
 fi
 
-if ! [ -f quickmc.properties ]; then
+if [ -f quickmc.properties ]; then
+    source quickmc.properties
+fi
+
+if ! [ -f quickmc.properties ] | [ $1 = "config"]; then
     # Initial setup
     DEFAULT_JAVA_PATH="/usr/lib/jvm/jdk-21-oracle-x64/bin/java"
+    if ! [ -z JVM_PATH ]; then DEFAULT_JAVA_PATH=$JVM_PATH; fi
+
     curl -s "https://launchermeta.mojang.com/mc/game/version_manifest.json" > mc_version_manifest.json
     echo "Thanks for using quickMC. Let's get you set up!"
     echo "Input the version of minecraft you want your server to run on (leave blank to use latest):"
@@ -46,8 +61,6 @@ JVM_GB=\"$JVM_GB\"
 
     echo "You're all set up! Configuration has been saved."
 else
-    source quickmc.properties
-fi
 
 JAR_PATH="server-$SERVER_VER.jar"
 (( JVM_M = JVM_GB * 1024 ))
