@@ -10,7 +10,7 @@
 
 if [ -x "$(command -v node)" ]; then
     QMC_NODE=true
-elif ! [ -x "$(command -v python2)" ]; then
+elif ! [ -x "$(command -v python3)" ]; then
     echo "quickMC requires either node.js or python3 to run, since it requires a JSON parser. Please install one of the two and try again."
     exit 1
 fi
